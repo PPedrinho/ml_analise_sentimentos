@@ -1,21 +1,34 @@
-
 import json
 import joblib
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from loguru import logger
 
 ROOT = Path(__file__).resolve().parent.parent
 MODEL_PATH = ROOT / "models" / "sentiment_model.joblib"
+FRONT_PATH = ROOT / "frontend" / "index.html"
 
+# Load trained model
 model = joblib.load(MODEL_PATH)
 
+# Create API
 app = FastAPI(
     title="API de Análise de Sentimentos",
     version="0.1.0"
 )
+
+# Permite o front chamar a API mesmo abrindo o HTML direto do disco
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 class Entrada(BaseModel):
     texto: str = Field(
@@ -24,11 +37,18 @@ class Entrada(BaseModel):
         examples=["Adorei o produto, excelente qualidade!"]
     )
 
+
 class Saida(BaseModel):
     texto: str
     sentimento: str
     confianca: float
     versao_modelo: str
+
+
+@app.get("/", include_in_schema=False)
+def home():
+    return FileResponse(FRONT_PATH)
+
 
 @app.get("/health", summary="Verificar saúde da API")
 def health():
@@ -38,6 +58,7 @@ def health():
         "version": app.version
     }
 
+
 @app.post(
     "/predict",
     summary="Classificar sentimento de um texto",
@@ -45,14 +66,19 @@ def health():
 )
 def predict(dados: Entrada):
 
+    # Calculate probabilities
     probas = model.predict_proba([dados.texto])[0]
 
+    # Get the highest probability
     i = int(probas.argmax())
 
+    # Get predicted sentiment
     sentimento = model.classes_[i]
 
+    # Get confidence
     confianca = round(float(probas[i]), 4)
 
+    # Build response
     resultado = Saida(
         texto=dados.texto,
         sentimento=str(sentimento),
@@ -60,6 +86,7 @@ def predict(dados: Entrada):
         versao_modelo="0.1.0"
     )
 
+    # Log prediction
     logger.info(
         json.dumps(
             resultado.model_dump(),
